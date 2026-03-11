@@ -1,41 +1,40 @@
 import { buildUserOp } from "../BuildUserOp";
-import { signUserOp } from "../SignUserOp";
-import { PackedUserOperation } from "viem";
 import { ethers } from "ethers";
 
-/**
- * @notice To run this script you must deploy ENTRY_POINT, ACCOUNT AND COUNTER contracts on anvil(local) chain to simulate and verify calldata in logs
- */
 async function main() {
-  const ENTRY_POINT = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // deployed EntryPoint
-  const ACCOUNT = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"; // MinimalAccount address
-  const COUNTER = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"; // Counter address
-
-  // Encode Counter.increment()
-  const counterInterface = new ethers.Interface(["function increment()"]);
-
-  const counterCallData = counterInterface.encodeFunctionData(
-    "increment",
-  ) as `0x${string}`;
+  const ENTRY_POINT = "0x8464135c8F25Da09e49BC8782676a84730C318bC";
+  const SMART_ACCOUNT = "0x71C95911E9a5D330f4D621842EC243EE1343292e";
+  const COUNTER = "0x948B3c65b89DF0B4894ABE91E6D02FE579834F8F";
 
   const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
+  const ownerPrivateKey = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+  const smartAccountOwner = new ethers.Wallet(ownerPrivateKey, provider);
 
-  const packedUserOp: PackedUserOperation = await buildUserOp({
-    provider,
-    entryPoint: ENTRY_POINT,
-    sender: ACCOUNT,
-    target: COUNTER,
-    data: counterCallData,
+  console.log("--- 2️⃣ Build + Sign UserOperation ---");
+  const tempOp = await buildUserOp({
+    provider, entryPoint: ENTRY_POINT, sender: SMART_ACCOUNT, target: COUNTER, data: "0xd09de08a",
   });
-  console.log("PackedUserOp build", packedUserOp);
 
-  const signedUserOp: PackedUserOperation = await signUserOp(
-    packedUserOp,
-    ENTRY_POINT,
-    provider,
-  );
+  const accountGasLimits = ethers.concat([
+    ethers.zeroPadValue(ethers.toBeHex(500000), 16), ethers.zeroPadValue(ethers.toBeHex(200000), 16)
+  ]);
+  const gasFees = ethers.concat([
+    ethers.zeroPadValue(ethers.toBeHex(1000000000), 16), ethers.zeroPadValue(ethers.toBeHex(2000000000), 16)
+  ]);
 
-  console.log("UserOp signed:", signedUserOp);
+  const userOpV07: any = {
+    sender: SMART_ACCOUNT, nonce: "0x" + BigInt(tempOp.nonce).toString(16), initCode: "0x",
+    callData: tempOp.callData, accountGasLimits, preVerificationGas: "0x" + (100000n).toString(16),
+    gasFees, paymasterAndData: "0x", signature: "0x"
+  };
+
+  const entryPointAbi = ["function getUserOpHash(tuple(address sender, uint256 nonce, bytes initCode, bytes callData, bytes32 accountGasLimits, uint256 preVerificationGas, bytes32 gasFees, bytes paymasterAndData, bytes signature) userOp) public view returns (bytes32)"];
+  const entryPointContract = new ethers.Contract(ENTRY_POINT, entryPointAbi, provider);
+
+  const userOpHash = await entryPointContract.getUserOpHash(userOpV07);
+  userOpV07.signature = await smartAccountOwner.signMessage(ethers.getBytes(userOpHash));
+
+  console.log("UserOp signed:", userOpV07);
 }
 
 main().catch(console.error);
